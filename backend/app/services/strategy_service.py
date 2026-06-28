@@ -10,7 +10,7 @@ from app.models.response import SurveyResponse
 from app.models.strategy_version import StrategyVersion
 from app.models.survey import Survey
 from app.services.llm_client import LLMClient
-from app.services.sandbox_runner import run_strategy, validate_strategy_code
+from app.services.sandbox_runner import StrategyExecutionError, StrategyValidationError, run_strategy, validate_strategy_code
 
 
 class StrategyService:
@@ -20,9 +20,19 @@ class StrategyService:
 
     async def codify(self) -> dict[str, Any]:
         prompt = self._build_prompt()
-        code = await self.llm_client.generate_strategy(prompt)
-        source = "llm" if code else "fallback"
-        if code is None:
+        code = None
+        source = "fallback"
+        candidate_prompt = prompt
+        for attempt in range(2):
+            candidate = await self.llm_client.generate_strategy(candidate_prompt)
+            ok, error = self._validate_strategy_candidate(candidate)
+            if ok:
+                code = candidate
+                source = "llm"
+                break
+            if attempt == 0:
+                candidate_prompt = self._build_retry_prompt(prompt, error)
+        if source == "fallback":
             code = build_fallback_strategy(self._correction_texts())
         strategy = self._save_strategy(code=code, source=source, prompt=prompt)
         payload = self._strategy_payload(strategy)
@@ -65,6 +75,20 @@ class StrategyService:
         self.db.commit()
         self.db.refresh(strategy)
         return strategy
+
+    def _validate_strategy_candidate(self, code: str | None) -> tuple[bool, str]:
+        if not code:
+            return False, "LLM returned no code"
+        try:
+            validate_strategy_code(code)
+            run_strategy(
+                code,
+                {"rsi14": 50, "vol_ratio": 1, "ma_align": "혼조"},
+                {"holding": False, "entry_price": None, "pnl_pct": 0},
+            )
+        except (StrategyExecutionError, StrategyValidationError) as exc:
+            return False, f"{type(exc).__name__}: {exc}"
+        return True, ""
 
     def _next_version(self) -> int:
         current = self.db.execute(select(func.max(StrategyVersion.version)).where(StrategyVersion.user_id == 1)).scalar()
@@ -137,9 +161,27 @@ class StrategyService:
                 "task": "Create Python decide(features, position) returning BUY, SELL, or HOLD.",
                 "responses": rows,
                 "corrections": self._correction_texts(),
-                "rules": ["no imports", "no file access", "no network access", "return dict with action and reason"],
+                "rules": [
+                    "return only Python code, no markdown",
+                    "define exactly def decide(features: dict, position: dict) -> dict",
+                    "return a dict with action and reason on every path",
+                    "action must be BUY, SELL, or HOLD",
+                    "do not use import, try/except, while, class, lambda, with, raise, open, eval, exec, getattr",
+                    "do not use isinstance or type checks; inputs are already normalized dictionaries",
+                    "use float(features.get('rsi14', 50) or 50) and bool(position.get('holding', False)) defaults",
+                ],
             },
             ensure_ascii=False,
+        )
+
+    def _build_retry_prompt(self, original_prompt: str, validation_error: str) -> str:
+        return (
+            original_prompt
+            + "\n\nPrevious code failed validation: "
+            + validation_error
+            + "\nReturn corrected code only. Do not use try/except, imports, classes, while loops, file access, "
+            "network access, eval, exec, isinstance, type checks, or markdown. Use float(features.get('rsi14', 50) or 50) "
+            "style defaults. Every return must include both action and reason."
         )
 
     def _correction_texts(self) -> list[str]:

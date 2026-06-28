@@ -9,6 +9,7 @@ from app.db import Base, create_engine_from_url, get_db
 from app.main import app
 from app.models.context_log import ContextLog
 from app.models.strategy_version import StrategyVersion
+from app.services.strategy_service import StrategyService
 
 
 KST = timezone(timedelta(hours=9))
@@ -109,3 +110,101 @@ def test_refine_logs_correction_and_creates_next_strategy_version(tmp_path):
     assert len(logs) == 1
 
     app.dependency_overrides.clear()
+
+
+class FakeLLM:
+    def __init__(self, code: str | None):
+        self.code = code
+        self.prompts: list[str] = []
+
+    async def generate_strategy(self, prompt: str) -> str | None:
+        self.prompts.append(prompt)
+        return self.code
+
+
+class SequenceLLM:
+    def __init__(self, codes: list[str | None]):
+        self.codes = codes
+        self.prompts: list[str] = []
+
+    async def generate_strategy(self, prompt: str) -> str | None:
+        self.prompts.append(prompt)
+        return self.codes.pop(0)
+
+
+def test_strategy_service_saves_valid_llm_code_as_llm_source(tmp_path):
+    client, SessionLocal = make_client(tmp_path)
+    seed_responses(client)
+    code = (
+        "def decide(features: dict, position: dict) -> dict:\n"
+        "    return {\"action\": \"HOLD\", \"reason\": \"valid llm\"}"
+    )
+
+    with SessionLocal() as db:
+        result = run_async(StrategyService(db, llm_client=FakeLLM(code)).codify())
+
+    assert result["source"] == "llm"
+    assert result["code"] == code
+
+    app.dependency_overrides.clear()
+
+
+def test_strategy_service_falls_back_when_llm_code_fails_result_validation(tmp_path):
+    client, SessionLocal = make_client(tmp_path)
+    seed_responses(client)
+    invalid_code = "def decide(features: dict, position: dict) -> dict:\n    return {\"action\": \"HOLD\"}"
+
+    with SessionLocal() as db:
+        result = run_async(StrategyService(db, llm_client=FakeLLM(invalid_code)).codify())
+
+    assert result["source"] == "fallback"
+    assert "warning" in result
+    assert "reason" in result["code"]
+
+    app.dependency_overrides.clear()
+
+
+def test_strategy_service_retries_llm_once_with_validation_feedback(tmp_path):
+    client, SessionLocal = make_client(tmp_path)
+    seed_responses(client)
+    invalid_code = (
+        "def decide(features: dict, position: dict) -> dict:\n"
+        "    try:\n"
+        "        return {\"action\": \"HOLD\", \"reason\": \"bad\"}\n"
+        "    except Exception:\n"
+        "        return {\"action\": \"HOLD\", \"reason\": \"bad\"}"
+    )
+    valid_code = (
+        "def decide(features: dict, position: dict) -> dict:\n"
+        "    return {\"action\": \"HOLD\", \"reason\": \"valid retry\"}"
+    )
+    llm = SequenceLLM([invalid_code, valid_code])
+
+    with SessionLocal() as db:
+        result = run_async(StrategyService(db, llm_client=llm).codify())
+
+    assert result["source"] == "llm"
+    assert result["code"] == valid_code
+    assert len(llm.prompts) == 2
+    assert "Previous code failed validation" in llm.prompts[1]
+
+    app.dependency_overrides.clear()
+
+
+def test_strategy_prompt_lists_sandbox_supported_python_only(tmp_path):
+    _, SessionLocal = make_client(tmp_path)
+
+    with SessionLocal() as db:
+        prompt = StrategyService(db)._build_prompt()
+
+    assert "do not use isinstance" in prompt
+    assert "use float(features.get" in prompt
+    assert "do not use import, try/except" in prompt
+
+    app.dependency_overrides.clear()
+
+
+def run_async(awaitable):
+    import asyncio
+
+    return asyncio.run(awaitable)

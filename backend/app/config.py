@@ -9,6 +9,9 @@ class Settings(BaseSettings):
     frontend_origin: str = Field(default="http://localhost:5173", alias="FRONTEND_ORIGIN")
     upbit_base_url: str = Field(default="https://api.upbit.com", alias="UPBIT_BASE_URL")
     llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
+    llm_api_key: str = Field(default="", alias="LLM_API_KEY")
+    llm_base_url: str = Field(default="https://api.scenery.today/v1", alias="LLM_BASE_URL")
+    llm_model: str = Field(default="glm5.0", alias="LLM_MODEL")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 
@@ -22,6 +25,10 @@ class Settings(BaseSettings):
     @property
     def cors_origins(self) -> list[str]:
         return [origin.strip() for origin in self.frontend_origin.split(",") if origin.strip()]
+
+    @property
+    def effective_llm_api_key(self) -> str:
+        return self.llm_api_key or self.openai_api_key
 
 
 @lru_cache
