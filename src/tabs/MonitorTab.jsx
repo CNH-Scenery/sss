@@ -40,6 +40,7 @@ export default function MonitorTab({ v }) {
                       <div style={css(`display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:10px`)}>
                         <div style={css(`font-weight:700;font-size:14px`)}>알림 피드</div>
                         <div style={css(`display:flex;gap:8px;align-items:center`)}>
+                          <button onClick={v.enableNotifications} disabled={v.notifDisabled} style={css(v.notifBtnStyle)}>{v.notifLabel}</button>
                           <input value={v.webhookDraft} onChange={v.onWebhook} placeholder="https://hooks.slack.com/…" style={css(`background:#0d1117;border:1px solid #1f2630;border-radius:7px;padding:7px 10px;color:#9aa4b1;font-size:11.5px;width:210px;font-family:'JetBrains Mono',monospace`)} />
                           <button onClick={v.testAlert} style={css(`background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;border-radius:7px;padding:7px 12px;font-size:12px;cursor:pointer;white-space:nowrap`)}>테스트 발송</button>
                         </div>

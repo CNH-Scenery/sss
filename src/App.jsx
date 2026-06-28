@@ -6,6 +6,7 @@ import SurveyTab from "./tabs/SurveyTab.jsx";
 import StrategyTab from "./tabs/StrategyTab.jsx";
 import BacktestTab from "./tabs/BacktestTab.jsx";
 import MonitorTab from "./tabs/MonitorTab.jsx";
+import { notifPermission, requestNotifyPermission, sendNotification } from "./notify.js";
 
 class App extends React.Component {
   constructor(props){
@@ -16,7 +17,7 @@ class App extends React.Component {
     this.state={ screen:'survey', surveyIndex:0, responses:{}, draftAction:null, draftReason:'',
       strategy:null, codifying:false, versions:[], correctionDraft:'',
       backtest:null, backtesting:false, consistency:null,
-      price:92418000, prevPrice:92418000, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'' };
+      price:92418000, prevPrice:92418000, signal:'HOLD', signalReason:'조건 불충족 — 관망', alerts:[], webhookDraft:'', notifPerm:notifPermission() };
   }
   componentDidMount(){ this._t=setInterval(this._tick,2300); if(this.props.demoMode) this.fillDemo(); }
   componentDidUpdate(prev){ if(!prev.demoMode && this.props.demoMode && this.doneCount()===0) this.fillDemo(); }
@@ -89,8 +90,9 @@ class App extends React.Component {
   runRefine=()=>{ const t=this.state.correctionDraft.trim(); if(!t||this.state.codifying||!this.state.strategy)return; const p={...this._codeParams}; if(/손절|stop|빠르|리스크|보수/.test(t)) p.pnlStop=Math.min(-2,p.pnlStop+1); else if(/거래량|volume|볼륨|엄격/.test(t)) p.volBuy=Math.round((p.volBuy+0.2)*100)/100; else if(/익절|목표|수익|길게|버티|버텨/.test(t)) p.pnlTake=p.pnlTake+1.5; else if(/과매도|rsi|민감|덜|공격/.test(t)) p.rsiBuy=Math.min(45,p.rsiBuy+3); else p.rsiBuy=Math.min(45,p.rsiBuy+2); p.extra=[...p.extra,t]; this._codeParams=p; this.setState({codifying:true}); setTimeout(()=>{ const v=this.state.strategy.version+1; const code=this._genCode(v); const cons=this._computeConsistency(); this.setState(s=>({codifying:false,correctionDraft:'',strategy:{version:v,code},consistency:cons,backtest:null,versions:[{version:v,label:'정제: '+(t.length>20?t.slice(0,20)+'…':t),time:this._now()},...s.versions]})); },1400); };
   runBacktest=()=>{ if(this.state.backtesting||!this.state.strategy)return; this.setState({backtesting:true}); setTimeout(()=>{ this.setState({backtesting:false,backtest:this._runBacktestData()}); },1500); };
   onWebhook=(e)=>this.setState({webhookDraft:e.target.value});
-  testAlert=()=>{ const al={action:'BUY',color:'#22c55e',text:'[테스트] KRW-BTC BUY 신호 · RSI 31 과매도 + 거래량 1.7x · '+this.state.price.toLocaleString()+'원',time:this._now()}; this.setState(s=>({alerts:[al,...s.alerts].slice(0,8)})); };
-  _tick=()=>{ this.setState(s=>{ const ch=(Math.random()-0.48)*0.0035; const np=Math.round(s.price*(1+ch)); const u={prevPrice:s.price,price:np}; if(this.props.liveSim!==false && s.screen==='monitor' && s.strategy && Math.random()<0.28){ const r=Math.random(); let sig='HOLD',rs='조건 불충족 — 관망'; if(r<0.16){ sig='BUY'; rs='RSI 32 과매도 + 거래량 1.6x'; } else if(r<0.27){ sig='SELL'; rs='RSI 74 과열 / 목표 도달'; } if(sig!=='HOLD'){ const col=sig==='BUY'?'#22c55e':'#ef4444'; u.signal=sig; u.signalReason=rs; u.alerts=[{action:sig,color:col,text:'[KRW-BTC] '+sig+' 신호 · '+rs+' · '+np.toLocaleString()+'원',time:this._now()},...s.alerts].slice(0,8); } } return u; }); };
+  enableNotifications=()=>{ requestNotifyPermission().then(p=>this.setState({notifPerm:p})); };
+  testAlert=()=>{ const al={action:'BUY',color:'#22c55e',text:'[테스트] KRW-BTC BUY 신호 · RSI 31 과매도 + 거래량 1.7x · '+this.state.price.toLocaleString()+'원',time:this._now()}; this.setState(s=>({alerts:[al,...s.alerts].slice(0,8)})); sendNotification('Tacit Trader · 테스트 알림', al.text, 'tt-test'); };
+  _tick=()=>{ const s=this.state; const ch=(Math.random()-0.48)*0.0035; const np=Math.round(s.price*(1+ch)); const u={prevPrice:s.price,price:np}; let fired=null; if(this.props.liveSim!==false && s.screen==='monitor' && s.strategy && Math.random()<0.28){ const r=Math.random(); let sig='HOLD',rs='조건 불충족 — 관망'; if(r<0.16){ sig='BUY'; rs='RSI 32 과매도 + 거래량 1.6x'; } else if(r<0.27){ sig='SELL'; rs='RSI 74 과열 / 목표 도달'; } if(sig!=='HOLD'){ const col=sig==='BUY'?'#22c55e':'#ef4444'; const text='[KRW-BTC] '+sig+' 신호 · '+rs+' · '+np.toLocaleString()+'원'; u.signal=sig; u.signalReason=rs; u.alerts=[{action:sig,color:col,text,time:this._now()},...s.alerts].slice(0,8); fired={sig,text}; } } this.setState(u); if(fired) sendNotification('Tacit Trader · '+fired.sig+' 신호', fired.text, 'tt-signal'); };
 
   renderVals(){
     const s=this.state; const A=this.props.accent||'#4f8cff';
@@ -170,6 +172,11 @@ class App extends React.Component {
       signalReason:s.signalReason,
       priceChangePct:(((s.price-this._open)/this._open*100)>=0?'+':'')+((s.price-this._open)/this._open*100).toFixed(2)+'%',
       webhookDraft:s.webhookDraft,onWebhook:this.onWebhook,testAlert:this.testAlert,
+      enableNotifications:this.enableNotifications,
+      notifPerm:s.notifPerm,
+      notifDisabled:s.notifPerm==='granted'||s.notifPerm==='unsupported',
+      notifLabel:s.notifPerm==='granted'?'🔔 알림 켜짐':s.notifPerm==='denied'?'알림 차단됨':s.notifPerm==='unsupported'?'알림 미지원':'🔔 데스크톱 알림 켜기',
+      notifBtnStyle:(()=>{ const on=s.notifPerm==='granted'; const off=s.notifPerm==='denied'||s.notifPerm==='unsupported'; const b='border-radius:7px;padding:7px 12px;font-size:12px;white-space:nowrap;'; if(on) return b+'background:rgba(34,197,94,0.12);border:1px solid rgba(34,197,94,0.4);color:#22c55e;cursor:default;'; if(off) return b+'background:#0e131b;border:1px solid #1f2630;color:#5a6472;cursor:not-allowed;'; return b+'background:#0e131b;border:1px solid #1f2630;color:#9aa4b1;cursor:pointer;'; })(),
       alertItems:s.alerts,hasAlerts:s.alerts.length>0,noAlerts:s.alerts.length===0,
       liveHint:this.props.liveSim===false?'(시뮬레이션 꺼짐 — 테스트 발송으로 확인)':''
     };
