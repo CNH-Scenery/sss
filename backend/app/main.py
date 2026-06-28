@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.api.backtest import router as backtest_router
 from app.api.responses import router as responses_router
 from app.api.strategy import router as strategy_router
 from app.api.surveys import router as surveys_router
@@ -34,6 +35,7 @@ def create_app() -> FastAPI:
     api.include_router(surveys_router)
     api.include_router(responses_router)
     api.include_router(strategy_router)
+    api.include_router(backtest_router)
 
     return api
 

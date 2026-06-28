@@ -10,8 +10,8 @@ class Settings(BaseSettings):
     upbit_base_url: str = Field(default="https://api.upbit.com", alias="UPBIT_BASE_URL")
     llm_provider: str = Field(default="openai", alias="LLM_PROVIDER")
     llm_api_key: str = Field(default="", alias="LLM_API_KEY")
-    llm_base_url: str = Field(default="https://api.scenery.today/v1", alias="LLM_BASE_URL")
-    llm_model: str = Field(default="glm5.0", alias="LLM_MODEL")
+    llm_base_url: str = Field(default="https://api.deepinfra.com/v1/openai", alias="LLM_BASE_URL")
+    llm_model: str = Field(default="zai-org/GLM-5", alias="LLM_MODEL")
     openai_api_key: str = Field(default="", alias="OPENAI_API_KEY")
     anthropic_api_key: str = Field(default="", alias="ANTHROPIC_API_KEY")
 

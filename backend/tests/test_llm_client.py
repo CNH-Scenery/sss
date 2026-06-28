@@ -66,8 +66,8 @@ async def test_llm_client_returns_none_on_http_failure():
     assert await client.generate_strategy("make a strategy") is None
 
 
-def test_settings_default_to_scenery_glm_model():
+def test_settings_default_to_deepinfra_glm_model():
     settings = Settings()
 
-    assert settings.llm_base_url == "https://api.scenery.today/v1"
-    assert settings.llm_model == "glm5.0"
+    assert settings.llm_base_url == "https://api.deepinfra.com/v1/openai"
+    assert settings.llm_model == "zai-org/GLM-5"
