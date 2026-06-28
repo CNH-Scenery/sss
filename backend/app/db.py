@@ -20,6 +20,12 @@ engine = create_engine_from_url(get_settings().database_url)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False, future=True)
 
 
+def init_db(bind: Engine = engine) -> None:
+    import app.models  # noqa: F401
+
+    Base.metadata.create_all(bind)
+
+
 def get_db() -> Generator[Session, None, None]:
     db = SessionLocal()
     try:
